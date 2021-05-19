@@ -1,10 +1,12 @@
 package cn.ey88.myspring;
 
+import cn.ey88.myspring.annotation.Autowired;
 import cn.ey88.myspring.annotation.Component;
 import cn.ey88.myspring.annotation.ComponentScan;
 import cn.ey88.myspring.annotation.Scope;
 
 import java.io.File;
+import java.lang.reflect.Field;
 import java.net.URL;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -14,7 +16,7 @@ public class AutoAnnotationApplicationContext {
     private static final ConcurrentHashMap<String, Object> singletonMap = new ConcurrentHashMap<>();
     private static final ConcurrentHashMap<String, BeanDefinition> beanDefinitionMap = new ConcurrentHashMap<>();
 
-    public AutoAnnotationApplicationContext(Class classConfig) {
+    public AutoAnnotationApplicationContext(Class<?> classConfig) {
         // 解析 classConfig
         if (!classConfig.isAnnotationPresent(ComponentScan.class))
             return;
@@ -32,11 +34,11 @@ public class AutoAnnotationApplicationContext {
 
     }
 
-    private void scan(Class classConfig) {
-        ComponentScan componentScanAnnotation = (ComponentScan) classConfig.getDeclaredAnnotation(ComponentScan.class);
+    private void scan(Class<?> classConfig) {
+        ComponentScan componentScanAnnotation = classConfig.getDeclaredAnnotation(ComponentScan.class);
         String scanPath = componentScanAnnotation.value().replace(".", "/");
         // todo : 如何处理异常
-        if ("" == scanPath)
+        if ("".equals(scanPath))
             throw new MySpringException("未配置扫描包路径");
 
         // 扫描
@@ -58,10 +60,18 @@ public class AutoAnnotationApplicationContext {
                     filePath = filePath.substring(filePath.indexOf("classes") + 8, filePath.indexOf(".class"));
                     filePath = filePath.replace("\\", ".");
                     Class<?> clazz = classLoader.loadClass(filePath);
+
                     // 处理 component
                     Component componentAnnotation = clazz.getDeclaredAnnotation(Component.class);
                     if (null == componentAnnotation) continue;
                     String beanName = componentAnnotation.value();
+                    if ("".equals(beanName)) {
+                        // 默认首字母小写
+                        char[] chars = clazz.getSimpleName().toCharArray();
+                        chars[0] += 32;
+                        beanName = String.valueOf(chars);
+                    }
+
                     BeanDefinition beanDefinition = new BeanDefinition();
                     beanDefinition.setClazz(clazz);
 
@@ -91,9 +101,18 @@ public class AutoAnnotationApplicationContext {
     }
 
     private Object createBean(BeanDefinition beanDefinition) {
-        Class clazz = beanDefinition.getClazz();
+        Class<?> clazz = beanDefinition.getClazz();
         try {
             Object o = clazz.getDeclaredConstructor().newInstance();
+
+            for (Field field : clazz.getDeclaredFields()) {
+                if (!field.isAnnotationPresent(Autowired.class)) continue;
+
+                Object fieldBean = getBean(field.getName());
+                field.setAccessible(true);
+                field.set(o, fieldBean);
+            }
+
             return o;
         } catch (Exception e) {
             e.printStackTrace();
