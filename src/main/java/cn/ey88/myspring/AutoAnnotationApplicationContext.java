@@ -131,15 +131,15 @@ public class AutoAnnotationApplicationContext {
             if (o instanceof BeanNameAware)
                 ((BeanNameAware) o).setBeanName(beanName);
             // 2 initial
-            for(BeanPostProcessor beanPostProcessor : beanPostProcessorList){
-                beanPostProcessor.postProcessBeforeInitialization(o,beanName);
+            for (BeanPostProcessor beanPostProcessor : beanPostProcessorList) {
+                o = beanPostProcessor.postProcessBeforeInitialization(o, beanName);
             }
 
             if (o instanceof InitializingBean)
                 ((InitializingBean) o).afterPropertiesSet();
 
-            for(BeanPostProcessor beanPostProcessor : beanPostProcessorList){
-                beanPostProcessor.postProcessAfterInitialization(o,beanName);
+            for (BeanPostProcessor beanPostProcessor : beanPostProcessorList) {
+                o = beanPostProcessor.postProcessAfterInitialization(o, beanName);
             }
 
             return o;
