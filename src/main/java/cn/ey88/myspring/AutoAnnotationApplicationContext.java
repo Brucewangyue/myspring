@@ -4,10 +4,15 @@ import cn.ey88.myspring.annotation.Autowired;
 import cn.ey88.myspring.annotation.Component;
 import cn.ey88.myspring.annotation.ComponentScan;
 import cn.ey88.myspring.annotation.Scope;
+import cn.ey88.myspring.beans.factory.BeanNameAware;
+import cn.ey88.myspring.beans.factory.InitializingBean;
+import cn.ey88.myspring.beans.factory.config.BeanPostProcessor;
 
 import java.io.File;
 import java.lang.reflect.Field;
 import java.net.URL;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -15,6 +20,7 @@ public class AutoAnnotationApplicationContext {
 
     private static final ConcurrentHashMap<String, Object> singletonMap = new ConcurrentHashMap<>();
     private static final ConcurrentHashMap<String, BeanDefinition> beanDefinitionMap = new ConcurrentHashMap<>();
+    private static final List<BeanPostProcessor> beanPostProcessorList = new ArrayList<>();
 
     public AutoAnnotationApplicationContext(Class<?> classConfig) {
         // 解析 classConfig
@@ -28,10 +34,9 @@ public class AutoAnnotationApplicationContext {
             String beanName = entry.getKey();
             BeanDefinition beanDefinition = entry.getValue();
             if ("singleton".equals(beanDefinition.getScope())) {
-                singletonMap.put(beanName, createBean(beanDefinition));
+                singletonMap.put(beanName, createBean(beanName, beanDefinition));
             }
         }
-
     }
 
     private void scan(Class<?> classConfig) {
@@ -64,6 +69,12 @@ public class AutoAnnotationApplicationContext {
                     // 处理 component
                     Component componentAnnotation = clazz.getDeclaredAnnotation(Component.class);
                     if (null == componentAnnotation) continue;
+
+                    if (BeanPostProcessor.class.isAssignableFrom(clazz)) {
+                        BeanPostProcessor beanPostProcessorInstance = (BeanPostProcessor) clazz.newInstance();
+                        beanPostProcessorList.add(beanPostProcessorInstance);
+                    }
+
                     String beanName = componentAnnotation.value();
                     if ("".equals(beanName)) {
                         // 默认首字母小写
@@ -81,7 +92,7 @@ public class AutoAnnotationApplicationContext {
 
                     beanDefinitionMap.put(beanName, beanDefinition);
 
-                } catch (ClassNotFoundException e) {
+                } catch (Exception e) {
                     e.printStackTrace();
                 }
             }
@@ -96,21 +107,39 @@ public class AutoAnnotationApplicationContext {
         if ("singleton".equals(beanDefinition.getScope())) {
             return singletonMap.get(beanName);
         } else {
-            return createBean(beanDefinition);
+            return createBean(beanName, beanDefinition);
         }
     }
 
-    private Object createBean(BeanDefinition beanDefinition) {
+    private Object createBean(String beanName, BeanDefinition beanDefinition) {
         Class<?> clazz = beanDefinition.getClazz();
         try {
             Object o = clazz.getDeclaredConstructor().newInstance();
 
+            // 循环依赖注入
             for (Field field : clazz.getDeclaredFields()) {
-                if (!field.isAnnotationPresent(Autowired.class)) continue;
+                Autowired autowiredAnnotation = field.getAnnotation(Autowired.class);
+                if (autowiredAnnotation == null) continue;
 
                 Object fieldBean = getBean(field.getName());
                 field.setAccessible(true);
                 field.set(o, fieldBean);
+            }
+
+            // 回调
+            // 1 aware
+            if (o instanceof BeanNameAware)
+                ((BeanNameAware) o).setBeanName(beanName);
+            // 2 initial
+            for(BeanPostProcessor beanPostProcessor : beanPostProcessorList){
+                beanPostProcessor.postProcessBeforeInitialization(o,beanName);
+            }
+
+            if (o instanceof InitializingBean)
+                ((InitializingBean) o).afterPropertiesSet();
+
+            for(BeanPostProcessor beanPostProcessor : beanPostProcessorList){
+                beanPostProcessor.postProcessAfterInitialization(o,beanName);
             }
 
             return o;
